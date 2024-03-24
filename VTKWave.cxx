@@ -15,11 +15,14 @@
 #include <math.h>
 #include <time.h>
 #include <thread>
-
+#include <vtkTriangle.h>
+#include <vtkPoints.h>
+#include <vtkCell.h>
+#include <QPushButton>
 struct UpdateData {
 	double time;
 	std::chrono::system_clock::time_point startTime;
-	std::vector<vtkSmartPointer<vtkActor>> actors;
+	vtkSmartPointer<vtkPolyData> plane_data;
 };
 
 vtkSmartPointer <vtkActor> CreateSphereActor(int posX, int posY, int posZ) {
@@ -49,7 +52,7 @@ void UpdateAppTime(double* time, std::chrono::system_clock::time_point start)
 {
 	auto end = std::chrono::system_clock::now();
 	auto seconds = end - start;
-	*time += 1/60.0;
+	*time += 1 / 60.0;
 
 }
 
@@ -57,18 +60,66 @@ void Update(vtkObject* caller, long unsigned int eventId, void* clientData, void
 {
 	UpdateData* data = (UpdateData*)clientData;
 	vtkRenderWindowInteractor* interactor = static_cast<vtkRenderWindowInteractor*>(caller);
-	int size = data->actors.size();
+	vtkSmartPointer<vtkPoints> points = data->plane_data->GetPoints();
+	int size = points->GetNumberOfPoints();
 	double position[3];
 	for (int i = 0; i < size; i++)
 	{
-		data->actors[i]->GetPosition(position);
-		double zPos = cos(data->time + position[1] * 0.5);
-		double newPos[3] = { position[0], position[1],  zPos};
-		data->actors[i]->SetPosition(newPos);
+		double* point = points->GetPoint(i);
+		double zPos = cos(data->time + point[1]);
+		points->SetPoint(i, point[0], point[1], zPos);
 	}
+	points->Modified();
 	std::cout << data->time << std::endl;
 	UpdateAppTime(&data->time, data->startTime);
 	interactor->GetRenderWindow()->Render();
+}
+
+vtkSmartPointer<vtkPolyData> GenerateMesh(int width, int height, int res_width, int res_height) {
+	vtkSmartPointer<vtkPoints> points = vtkSmartPointer<vtkPoints>::New();
+
+	double deltaX = width / (double)res_width;
+	double deltaY = height / (double)res_height;
+	for (int j = 0; j < res_height; j++)
+	{
+		for (int i = 0; i < res_width; i++)
+		{
+			points->InsertNextPoint(i * deltaX, j * deltaY, 0);
+		}
+	}
+
+	vtkSmartPointer<vtkCellArray> cells = vtkSmartPointer<vtkCellArray>::New();
+
+	for (int h = 0; h < res_height - 1; h++)
+	{
+		for (int w = 0; w < res_width - 1; w++)
+		{
+			vtkSmartPointer<vtkTriangle> triangle_left = vtkSmartPointer<vtkTriangle>::New();
+			triangle_left->GetPointIds()->SetId(0, h * res_width + w);
+			triangle_left->GetPointIds()->SetId(1, h * res_width + w + 1);
+			triangle_left->GetPointIds()->SetId(2, (h + 1) * res_width + w + 1);
+			cells->InsertNextCell(triangle_left);
+
+			vtkSmartPointer<vtkTriangle> triangle_right = vtkSmartPointer<vtkTriangle>::New();
+			triangle_right->GetPointIds()->SetId(0, h * res_width + w);
+			triangle_right->GetPointIds()->SetId(1, (h + 1) * res_width + w + 1);
+			triangle_right->GetPointIds()->SetId(2, (h + 1) * res_width + w);
+			cells->InsertNextCell(triangle_right);
+		}
+	}
+
+	vtkSmartPointer<vtkPolyData> poly_data = vtkSmartPointer<vtkPolyData>::New();
+	poly_data->SetPoints(points);
+	poly_data->SetPolys(cells);
+	return poly_data;
+}
+
+vtkSmartPointer<vtkActor> GetCustomMeshActor(vtkSmartPointer<vtkPolyData> poly_data) {
+	vtkSmartPointer<vtkPolyDataMapper> mapper = vtkSmartPointer<vtkPolyDataMapper>::New();
+	mapper->SetInputData(poly_data);
+	vtkSmartPointer<vtkActor> actor = vtkSmartPointer<vtkActor>::New();
+	actor->SetMapper(mapper);
+	return actor;
 }
 
 
@@ -76,19 +127,13 @@ int main(int argc, char* argv[])
 {
 	// Create a renderer
 	vtkSmartPointer<vtkRenderer> renderer = vtkSmartPointer<vtkRenderer>::New();
-	std::vector<vtkSmartPointer<vtkActor>> actors;
-	//CreateSpheres
-	for (int i = 0; i < 9; i++)
-	{
-		for (int j = 0; j < 9; j++)
-		{
-			vtkSmartPointer<vtkActor> actor = CreateSphereActor(i * 2, j * 2, 0);
-			actors.push_back(actor);
-			renderer->AddActor(actor);
-		}
-	}
-
 	// Create a render window
+	vtkSmartPointer<vtkPolyData> poly_data = GenerateMesh(5, 5, 100, 100);
+	vtkSmartPointer<vtkPolyDataMapper> mapper = vtkSmartPointer<vtkPolyDataMapper>::New();
+	mapper->SetInputData(poly_data);
+	vtkSmartPointer<vtkActor> actor = vtkSmartPointer<vtkActor>::New();
+	actor->SetMapper(mapper);
+	renderer->AddActor(actor);
 	vtkSmartPointer<vtkRenderWindow> renderWindow = vtkSmartPointer<vtkRenderWindow>::New();
 	renderWindow->AddRenderer(renderer);
 
@@ -101,7 +146,7 @@ int main(int argc, char* argv[])
 	renderWindowInteractor->Initialize();
 
 	UpdateData clientData;
-	clientData.actors = actors;
+	clientData.plane_data = poly_data;
 	clientData.startTime = std::chrono::system_clock::now();
 	clientData.time = 0;
 
