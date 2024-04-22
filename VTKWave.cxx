@@ -22,11 +22,56 @@
 #include <vtkLookupTable.h>
 #include <vtkFloatArray.h>
 #include <vtkPointData.h>
+#include <vtkPngReader.h>
+#include <vtkImageData.h>
+#include <vtkInteractorStyleTrackballCamera.h>
+
+class ArrowInteractorStyle : public vtkInteractorStyleTrackballCamera
+{
+
+	int xPos = 0;
+	int yPos = 0;
+public:
+	static ArrowInteractorStyle* New();
+	vtkTypeMacro(ArrowInteractorStyle, vtkInteractorStyleTrackballCamera);
+	virtual void OnKeyPress() override
+	{
+		vtkRenderWindowInteractor* rwi = this->Interactor;
+		std::string key = rwi->GetKeySym();
+		if (key == "Up") {
+			yPos+= 10;
+		}
+		if (key == "Down") {
+			yPos-= 10;
+		}
+		if (key == "Right") {
+			xPos+= 10;
+		}
+		if (key == "Light") {
+			xPos-= 10;
+		}
+
+		vtkInteractorStyleTrackballCamera::OnKeyPress();
+	}
+
+	int GetPosX() const {
+		return this->xPos;
+	}
+
+	int GetPosY() const {
+		return this->yPos;
+	}
+
+};
+vtkStandardNewMacro(ArrowInteractorStyle);
+
 struct UpdateData {
 	double time;
 	std::chrono::system_clock::time_point startTime;
 	vtkSmartPointer<vtkPolyData> plane_data;
 	vtkSmartPointer<vtkPolyDataMapper> mapper;
+	vtkSmartPointer<vtkImageData> texture;
+	vtkSmartPointer<ArrowInteractorStyle> arrowInteractor;
 };
 
 vtkSmartPointer <vtkActor> CreateSphereActor(int posX, int posY, int posZ) {
@@ -79,13 +124,16 @@ void Update(vtkObject* caller, long unsigned int eventId, void* clientData, void
 	vtkSmartPointer<vtkPoints> points = data->plane_data->GetPoints();
 	vtkSmartPointer<vtkLookupTable> lookupTable = CreateLookupTable(0.33, 0.33, 0.6, 0.6, 0.4, 0.8);
 	int size = points->GetNumberOfPoints();
+	int* dims = data->texture->GetDimensions();
+	vtkDataArray* pixel_points = data->texture->GetPointData()->GetScalars();
 	double position[3];
 	for (int i = 0; i < size; i++)
 	{
 		double* point = points->GetPoint(i);
-		double zPos = 0.5 * cos(data->time + point[0]) + 0.5 * sin(data->time + point[1]);
-		scalars->InsertNextTuple1(zPos);
-		points->SetPoint(i, point[0], point[1], zPos);
+		int indexX = (data->arrowInteractor->GetPosX() + (int)point[0]) % dims[0];
+		int indexY = (data->arrowInteractor->GetPosY() + (int)point[1]) % dims[1];
+		double* zPos = pixel_points->GetTuple((indexX + indexY * dims[0]));
+		points->SetPoint(i, point[0], point[1], (zPos[0] / 255.0) * 100);
 	}
 	points->Modified();
 	data->plane_data->GetPointData()->SetScalars(scalars);
@@ -106,7 +154,7 @@ vtkSmartPointer<vtkPolyData> GenerateMesh(int width, int height, int res_width, 
 	{
 		for (int i = 0; i < res_width; i++)
 		{
-			points->InsertNextPoint(i * deltaX, j * deltaY, 0);
+			points->InsertNextPoint(i, j, 0);
 		}
 	}
 
@@ -144,14 +192,32 @@ vtkSmartPointer<vtkActor> GetCustomMeshActor(vtkSmartPointer<vtkPolyData> poly_d
 	return actor;
 }
 
+vtkSmartPointer<vtkPNGReader> ReadHeightMap(std::string height_map){
+	vtkSmartPointer<vtkPNGReader> reader = vtkSmartPointer<vtkPNGReader>::New();
+	reader->SetFileName(height_map.c_str());
+	if (reader->CanReadFile(height_map.c_str()) == false) {
+		std::cout << "Can't read this file" << std::endl;
+		return NULL;
+	}
+
+	reader->Update();
+	return reader;
+}
+
 
 int main(int argc, char* argv[])
 {
 	// Create a renderer
 	vtkSmartPointer<vtkRenderer> renderer = vtkSmartPointer<vtkRenderer>::New();
+	vtkSmartPointer<vtkPNGReader> height_map = ReadHeightMap("D:\\studies\\CG\\Builds\\VtkWave\\VTKWave\\height_map.png");
+	int* dims = height_map->GetOutput()->GetDimensions();
+	vtkDataArray* scalars = height_map->GetOutput()->GetPointData()->GetScalars();
+	int dataType = scalars->GetDataType();
+	std:cout << "Data type is: " << vtkImageScalarTypeNameMacro(dataType) << std::endl;
 	// Create a render window
-	vtkSmartPointer<vtkPolyData> poly_data = GenerateMesh(5, 5, 100, 100);
+	vtkSmartPointer<vtkPolyData> poly_data = GenerateMesh(5, 5, dims[0], dims[1]);
 	vtkSmartPointer<vtkPolyDataMapper> mapper = vtkSmartPointer<vtkPolyDataMapper>::New();
+
 	mapper->SetInputData(poly_data);
 	vtkSmartPointer<vtkActor> actor = vtkSmartPointer<vtkActor>::New();
 	actor->SetMapper(mapper);
@@ -161,8 +227,9 @@ int main(int argc, char* argv[])
 
 	// Create a render window interactor
 	vtkSmartPointer<vtkRenderWindowInteractor> renderWindowInteractor = vtkSmartPointer<vtkRenderWindowInteractor>::New();
+	vtkSmartPointer<ArrowInteractorStyle> arrowInteractor = vtkSmartPointer<ArrowInteractorStyle>::New();
 	renderWindowInteractor->SetRenderWindow(renderWindow);
-
+	renderWindowInteractor->SetInteractorStyle(arrowInteractor);
 	// Initialize the interactor and start the rendering loop
 	renderWindow->Render();
 	renderWindowInteractor->Initialize();
@@ -171,7 +238,9 @@ int main(int argc, char* argv[])
 	clientData.plane_data = poly_data;
 	clientData.startTime = std::chrono::system_clock::now();
 	clientData.mapper = mapper;
+	clientData.texture = height_map->GetOutput();
 	clientData.time = 0;
+	clientData.arrowInteractor = arrowInteractor;
 
 	vtkSmartPointer<vtkCallbackCommand> renderCallback = vtkSmartPointer<vtkCallbackCommand>::New();
 	renderCallback->SetCallback(Update);
