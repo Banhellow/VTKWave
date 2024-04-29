@@ -24,6 +24,7 @@
 #include <vtkPointData.h>
 #include <vtkPngReader.h>
 #include <vtkImageData.h>
+#include <vtkCamera.h>
 #include <vtkInteractorStyleTrackballCamera.h>
 
 class ArrowInteractorStyle : public vtkInteractorStyleTrackballCamera
@@ -45,10 +46,10 @@ public:
 			yPos-= 10;
 		}
 		if (key == "Right") {
-			xPos+= 10;
-		}
-		if (key == "Light") {
 			xPos-= 10;
+		}
+		if (key == "Left") {
+			xPos+= 10;
 		}
 
 		vtkInteractorStyleTrackballCamera::OnKeyPress();
@@ -95,7 +96,9 @@ vtkSmartPointer <vtkActor> CreateSphereActor(int posX, int posY, int posZ) {
 	return actor;
 }
 
-
+int Modulo(int arg, int divider) {
+	return ((arg % divider) + divider) % divider;
+}
 
 void UpdateAppTime(double* time, std::chrono::system_clock::time_point start)
 {
@@ -108,7 +111,7 @@ void UpdateAppTime(double* time, std::chrono::system_clock::time_point start)
 vtkSmartPointer<vtkLookupTable> CreateLookupTable(float hueMin, float hueMax, float satMin, float satMax, float valMin, float valMax)
 {
 	vtkSmartPointer<vtkLookupTable> lookupTable = vtkSmartPointer<vtkLookupTable>::New();
-	lookupTable->SetRange(-1, 1);
+	lookupTable->SetRange(0, 1);
 	lookupTable->SetHueRange(hueMin, hueMax);
 	lookupTable->SetSaturationRange(satMin, satMax);
 	lookupTable->SetValueRange(valMin, valMax);
@@ -122,7 +125,7 @@ void Update(vtkObject* caller, long unsigned int eventId, void* clientData, void
 	vtkRenderWindowInteractor* interactor = static_cast<vtkRenderWindowInteractor*>(caller);
 	vtkSmartPointer<vtkFloatArray> scalars = vtkSmartPointer<vtkFloatArray>::New();
 	vtkSmartPointer<vtkPoints> points = data->plane_data->GetPoints();
-	vtkSmartPointer<vtkLookupTable> lookupTable = CreateLookupTable(0.33, 0.33, 0.6, 0.6, 0.4, 0.8);
+	vtkSmartPointer<vtkLookupTable> lookupTable = CreateLookupTable(0.33, 0.33, 0, 0.8, 1, 1);
 	int size = points->GetNumberOfPoints();
 	int* dims = data->texture->GetDimensions();
 	vtkDataArray* pixel_points = data->texture->GetPointData()->GetScalars();
@@ -130,20 +133,21 @@ void Update(vtkObject* caller, long unsigned int eventId, void* clientData, void
 	for (int i = 0; i < size; i++)
 	{
 		double* point = points->GetPoint(i);
-		int indexX = (data->arrowInteractor->GetPosX() + (int)point[0]) % dims[0];
-		int indexY = (data->arrowInteractor->GetPosY() + (int)point[1]) % dims[1];
+		int indexY = Modulo(data->arrowInteractor->GetPosY() + (int)point[1], dims[1]);
+		int indexX = Modulo(data->arrowInteractor->GetPosX() + (int)point[0], dims[0]);
 		double* zPos = pixel_points->GetTuple((indexX + indexY * dims[0]));
 		points->SetPoint(i, point[0], point[1], (zPos[0] / 255.0) * 100);
+		scalars->InsertNextTuple1(zPos[0] / 255.0);
 	}
 	points->Modified();
 	data->plane_data->GetPointData()->SetScalars(scalars);
 	data->mapper->SetLookupTable(lookupTable);
-	data->mapper->SetScalarRange(-1, 1);
+	data->mapper->SetScalarRange(0,1);
 	data->mapper->SetScalarVisibility(true);
-	std::cout << data->time << std::endl;
 	UpdateAppTime(&data->time, data->startTime);
 	interactor->GetRenderWindow()->Render();
 }
+
 
 vtkSmartPointer<vtkPolyData> GenerateMesh(int width, int height, int res_width, int res_height) {
 	vtkSmartPointer<vtkPoints> points = vtkSmartPointer<vtkPoints>::New();
@@ -209,7 +213,15 @@ int main(int argc, char* argv[])
 {
 	// Create a renderer
 	vtkSmartPointer<vtkRenderer> renderer = vtkSmartPointer<vtkRenderer>::New();
+	vtkSmartPointer<vtkCamera> camera = vtkSmartPointer<vtkCamera>::New();
 	vtkSmartPointer<vtkPNGReader> height_map = ReadHeightMap("D:\\studies\\CG\\Builds\\VtkWave\\VTKWave\\height_map.png");
+	camera = renderer->GetActiveCamera();
+	camera->SetFocalPoint(256, 256, 0);
+	camera->SetPosition(255.9, 0, 0);
+	camera->SetRoll(180);
+
+	camera->GetProjectionTransformMatrix(renderer)->Print(std::cout);
+
 	int* dims = height_map->GetOutput()->GetDimensions();
 	vtkDataArray* scalars = height_map->GetOutput()->GetPointData()->GetScalars();
 	int dataType = scalars->GetDataType();
