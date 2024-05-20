@@ -8,12 +8,19 @@ find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets)
 #include VTK
 find_package(VTK COMPONENTS)
 
-set(PROJECT_SOURCES
-    VTKWave.cxx
-)
+
+#Add headers directory
+include_directories(headers)
+
+#Add source files
+file(GLOB HEADER_FILES headers/*.h)
+file(GLOB SOURCE_FILES src/*.cpp)
 
 #Adding executable
-add_executable(VTKWave MACOSX_BUNDLE VTKWave.cxx )
+add_executable(VTKWave ${SOURCE_FILES} ${HEADER_FILES})
+
+source_group("Headers" FILES ${HEADER_FILES})
+source_group("Sources" FILES ${SOURCE_FILES})
 
 #Libraries linking (QT and VTK)
 target_link_libraries(VTKWave PRIVATE ${VTK_LIBRARIES})
