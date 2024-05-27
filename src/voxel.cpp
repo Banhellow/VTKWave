@@ -25,8 +25,9 @@ void VoxelMesh::Tick(float deltaTime)
 	{
 		double pos[3];
 		imageData->GetPoint(i, pos);
-		double* zPos = pixel_points->GetTuple((pos[0] + pos[1] * dims[0]));
-		int texPosX = MathUtils::Modulo(data->inputAxis[0] + pos[0], 512);
+		int texPosX = MathUtils::Modulo(data->inputAxis[0] + pos[0], dims[0]);
+		int texPosY = MathUtils::Modulo(data->inputAxis[1] + pos[1], dims[1]);
+		double* zPos = pixel_points->GetTuple((texPosX + texPosY * dims[0]));
 		auto voxelValue = static_cast<unsigned char*>(imageData->GetScalarPointer(pos[0], pos[1], pos[2]));
 		double voxelHeight = pos[2] / dimZ;
 		double textureValue = zPos[0] / 255.0;
@@ -62,7 +63,7 @@ void VoxelMesh::SetupVolume() {
 
 	auto volumeProperty = vtkSmartPointer<vtkVolumeProperty>::New();
 	volumeProperty->SetScalarOpacity(opacityFunction);
-	volumeProperty->ShadeOn();
+	//volumeProperty->ShadeOn();
 	volumeProperty->SetColor(colorTransferFunction);
 	volumeProperty->SetInterpolationTypeToLinear();
 

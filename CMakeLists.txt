@@ -12,6 +12,8 @@ find_package(VTK COMPONENTS)
 #Add headers directory
 include_directories(headers)
 
+
+
 #Add source files
 file(GLOB HEADER_FILES headers/*.h)
 file(GLOB SOURCE_FILES src/*.cpp)
@@ -25,6 +27,13 @@ source_group("Sources" FILES ${SOURCE_FILES})
 #Libraries linking (QT and VTK)
 target_link_libraries(VTKWave PRIVATE ${VTK_LIBRARIES})
 target_link_libraries(VTKWave PRIVATE ${QT_LIBRARIES})
+
+add_custom_command(
+    TARGET VTKWave PRE_LINK
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_SOURCE_DIR}/images
+            ${CMAKE_CURRENT_BINARY_DIR}/images
+)
 
 if (NOT VTK_FOUND)
   message(FATAL_ERROR "VTKWave: Unable to find the VTK build folder.")

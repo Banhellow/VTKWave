@@ -29,6 +29,9 @@
 #include <vtkDataSetMapper.h>
 #include <voxel.h>
 #include <VoxelData.h>
+#include <vtkTexture.h>
+#include <vtkSkybox.h>
+#include<vtkJPEGReader.h>
 
 class ArrowInteractorStyle : public vtkInteractorStyleTrackballCamera
 {
@@ -59,7 +62,7 @@ public:
 	}
 
 	void InitiailizeAxis() {
-		inputAxis = new int[2];
+		inputAxis = new int[2] {0, 0};
 	}
 
 	int GetPosX() const {
@@ -120,13 +123,30 @@ vtkSmartPointer<vtkPNGReader> ReadHeightMap(std::string height_map){
 	return reader;
 }
 
+vtkSmartPointer<vtkSkybox> CreateSkybox(std::vector<std::string> fileNames) {
+	vtkSmartPointer<vtkTexture> texture = vtkSmartPointer<vtkTexture>::New();
+	texture->CubeMapOn();
+	int i = 0;
+	for (auto const& fn : fileNames) {
+		vtkSmartPointer<vtkJPEGReader> jpegReader = vtkSmartPointer<vtkJPEGReader>::New();
+		jpegReader->SetFileName(fn.c_str());
+		jpegReader->Update();
+		texture->SetInputConnection(i, jpegReader->GetOutputPort());
+		i++;
+	}
+
+	vtkSmartPointer<vtkSkybox> skybox = vtkSmartPointer<vtkSkybox>::New();
+	skybox->SetTexture(texture);
+	return skybox;
+}
+
 
 int main(int argc, char* argv[])
 {
 	// Create a renderer
 	vtkSmartPointer<vtkRenderer> renderer = vtkSmartPointer<vtkRenderer>::New();
 	vtkSmartPointer<vtkCamera> camera = vtkSmartPointer<vtkCamera>::New();
-	vtkSmartPointer<vtkPNGReader> height_map = ReadHeightMap("D:\\studies\\CG\\Builds\\VtkWave\\VTKWave\\height_map.png");
+	vtkSmartPointer<vtkPNGReader> height_map = ReadHeightMap(R"(images\height_map.png)");
 	camera = renderer->GetActiveCamera();
 	camera->SetFocalPoint(256, 256, 0);
 	camera->SetPosition(255.9, 0, -40);
@@ -146,7 +166,10 @@ int main(int argc, char* argv[])
 	vtkSmartPointer<vtkRenderWindow> renderWindow = vtkSmartPointer<vtkRenderWindow>::New();
 	renderWindow->AddRenderer(renderer);
 
-
+	auto skybox = CreateSkybox({R"(images\posx.jpg)", R"(images\negx.jpg)",
+								R"(images\negy.jpg)", R"(images\posy.jpg)",
+								R"(images\posz.jpg)", R"(images\negz.jpg)"});
+	renderer->AddActor(skybox);
 
 	// Create a render window interactor
 	vtkSmartPointer<vtkRenderWindowInteractor> renderWindowInteractor = vtkSmartPointer<vtkRenderWindowInteractor>::New();
