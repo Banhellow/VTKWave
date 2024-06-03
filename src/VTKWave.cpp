@@ -32,7 +32,13 @@
 #include <vtkTexture.h>
 #include <vtkSkybox.h>
 #include<vtkJPEGReader.h>
-
+#include <qfile.h>
+#include <vtkUnsignedShortArray.h>
+#include <vtkSmartVolumeMapper.h>
+#include<fstream>
+#include<vtkPiecewiseFunction.h>
+#include<vtkColorTransferFunction.h>
+#include<vtkVolumeProperty.h>
 class ArrowInteractorStyle : public vtkInteractorStyleTrackballCamera
 {
 
@@ -92,6 +98,27 @@ void UpdateAppTime(double* time, std::chrono::system_clock::time_point start)
 
 }
 
+std::vector<unsigned short>  ReadDataFromFile(std::string path) {
+	std::ifstream readStream(path, std::ios::binary);
+
+	if (!readStream) {
+		std::cout << "Failed to open file: " << std::endl;
+	}
+
+	readStream.seekg(0, std::ios::end);
+	std::streampos fileSize = readStream.tellg();
+	readStream.seekg(0, std::ios::beg);
+	std::vector<unsigned short> fileData(fileSize / sizeof(unsigned short));
+	readStream.read(reinterpret_cast<char*>(fileData.data()), fileSize);
+	readStream.close();
+
+	if (512 * 512 * 247 != fileData.size()) {
+		std::cerr << "Volume dimensions do not match the file size" << std::endl;
+	}
+
+	return fileData;
+}
+
 vtkSmartPointer<vtkLookupTable> CreateLookupTable(float hueMin, float hueMax, float satMin, float satMax, float valMin, float valMax)
 {
 	vtkSmartPointer<vtkLookupTable> lookupTable = vtkSmartPointer<vtkLookupTable>::New();
@@ -147,10 +174,52 @@ int main(int argc, char* argv[])
 	vtkSmartPointer<vtkRenderer> renderer = vtkSmartPointer<vtkRenderer>::New();
 	vtkSmartPointer<vtkCamera> camera = vtkSmartPointer<vtkCamera>::New();
 	vtkSmartPointer<vtkPNGReader> height_map = ReadHeightMap(R"(images\height_map.png)");
-	camera = renderer->GetActiveCamera();
-	camera->SetFocalPoint(256, 256, 0);
-	camera->SetPosition(255.9, 0, -40);
-	camera->SetRoll(180);
+
+	vtkSmartPointer<vtkColorTransferFunction> colorTransferFunction = vtkSmartPointer<vtkColorTransferFunction>::New();
+	colorTransferFunction->AddRGBPoint(0.0, 0.0, 0.0, 0.0);  
+	colorTransferFunction->AddRGBPoint(255.0, 1.0, 1.0, 1.0);
+
+	vtkSmartPointer<vtkPiecewiseFunction> opacityFunction = vtkSmartPointer<vtkPiecewiseFunction>::New();
+	opacityFunction->AddPoint(0.0, 0.0);
+	opacityFunction->AddPoint(255.0, 1.0);
+
+	auto volumeProperty = vtkSmartPointer<vtkVolumeProperty>::New();
+	volumeProperty->SetScalarOpacity(opacityFunction);
+	//volumeProperty->ShadeOn();
+	volumeProperty->SetColor(colorTransferFunction);
+	volumeProperty->SetInterpolationTypeToLinear();
+
+	auto data = ReadDataFromFile(R"(images\CT.rdata)");
+
+	auto imageData = vtkSmartPointer<vtkImageData>::New();
+	imageData->SetDimensions(512, 512, 247);
+	imageData->SetSpacing(0.447266, 0.447266, 0.625);
+	imageData->SetOrigin(0.0, 0.0, 0.0);
+	imageData->AllocateScalars(VTK_UNSIGNED_SHORT, 1);
+	unsigned short* pointer = static_cast<unsigned short*>(imageData->GetScalarPointer());
+	std::copy(data.begin(), data.end(), pointer);
+
+	auto mapper1 = vtkSmartPointer<vtkFixedPointVolumeRayCastMapper>::New();
+	mapper1->SetInputData(imageData);
+	auto volume1 = vtkSmartPointer<vtkVolume>::New();
+	volume1->SetMapper(mapper1);
+	volume1->SetProperty(volumeProperty);
+
+	auto data2 = ReadDataFromFile(R"(images\MR_TO_CT.rdata)");
+
+	auto imageData1 = vtkSmartPointer<vtkImageData>::New();
+	imageData1->SetDimensions(512, 512, 247);
+	imageData1->SetSpacing(0.447266, 0.447266, 0.625);
+	imageData1->SetOrigin(0.0, 0.0, 0.0);
+	imageData1->AllocateScalars(VTK_UNSIGNED_SHORT, 1);
+	unsigned short* pointer1 = static_cast<unsigned short*>(imageData1->GetScalarPointer());
+	std::copy(data2.begin(), data2.end(), pointer);
+
+	auto mapper2 = vtkSmartPointer<vtkFixedPointVolumeRayCastMapper>::New();
+	mapper2->SetInputData(imageData);
+	auto volume2 = vtkSmartPointer<vtkVolume>::New();
+	volume2->SetMapper(mapper2);
+	volume2->SetProperty(volumeProperty);
 
 	camera->GetProjectionTransformMatrix(renderer)->Print(std::cout);
 	vtkSmartPointer<ArrowInteractorStyle> arrowInteractor = vtkSmartPointer<ArrowInteractorStyle>::New();
@@ -161,15 +230,16 @@ int main(int argc, char* argv[])
 	auto voxelData = new VoxelData(height_map->GetOutput(), arrowInteractor->inputAxis);
 	voxel->UpdateData(voxelData);
 	voxel->Initialize();
-	renderer->AddVolume(voxel->volume);
+	renderer->AddVolume(volume1);
+	renderer->AddVolume(volume2);
 	renderer->SetBackground(0.1, 0.2, 0.4);
 	vtkSmartPointer<vtkRenderWindow> renderWindow = vtkSmartPointer<vtkRenderWindow>::New();
 	renderWindow->AddRenderer(renderer);
 
-	auto skybox = CreateSkybox({R"(images\posx.jpg)", R"(images\negx.jpg)",
-								R"(images\negy.jpg)", R"(images\posy.jpg)",
-								R"(images\posz.jpg)", R"(images\negz.jpg)"});
-	renderer->AddActor(skybox);
+	//auto skybox = CreateSkybox({R"(images\posx.jpg)", R"(images\negx.jpg)",
+	//							R"(images\negy.jpg)", R"(images\posy.jpg)",
+	//							R"(images\posz.jpg)", R"(images\negz.jpg)"});
+	//renderer->AddActor(skybox);
 
 	// Create a render window interactor
 	vtkSmartPointer<vtkRenderWindowInteractor> renderWindowInteractor = vtkSmartPointer<vtkRenderWindowInteractor>::New();
@@ -180,16 +250,16 @@ int main(int argc, char* argv[])
 	renderWindow->Render();
 	renderWindowInteractor->Initialize();
 
-	UpdateData clientData;
-	clientData.time = 0;
-	clientData.arrowInteractor = arrowInteractor;
-	clientData.mesh = voxel;
+	//UpdateData clientData;
+	//clientData.time = 0;
+	//clientData.arrowInteractor = arrowInteractor;
+	//clientData.mesh = voxel;
 
-	vtkSmartPointer<vtkCallbackCommand> renderCallback = vtkSmartPointer<vtkCallbackCommand>::New();
-	renderCallback->SetCallback(Update);
-	renderCallback->SetClientData(&clientData);
-	renderWindowInteractor->AddObserver(vtkCommand::TimerEvent, renderCallback);
-	int timerId = renderWindowInteractor->CreateRepeatingTimer(0);
+	//vtkSmartPointer<vtkCallbackCommand> renderCallback = vtkSmartPointer<vtkCallbackCommand>::New();
+	//renderCallback->SetCallback(Update);
+	//renderCallback->SetClientData(&clientData);
+	//renderWindowInteractor->AddObserver(vtkCommand::TimerEvent, renderCallback);
+	//int timerId = renderWindowInteractor->CreateRepeatingTimer(0);
 	renderWindowInteractor->Start();
 	return 0;
 }
