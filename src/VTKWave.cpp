@@ -8,7 +8,7 @@
 #include <vtkRenderWindow.h>
 #include <vtkRenderWindowInteractor.h>
 #include <vtkRenderer.h>
-#include <vtkSmartPointer.h>
+
 #include <vtkSphereSource.h>
 #include <vtkCallbackCommand.h>
 #include <vtkTransform.h>
@@ -39,47 +39,9 @@
 #include<vtkPiecewiseFunction.h>
 #include<vtkColorTransferFunction.h>
 #include<vtkVolumeProperty.h>
-class ArrowInteractorStyle : public vtkInteractorStyleTrackballCamera
-{
-
-public:
-	int* inputAxis;
-	static ArrowInteractorStyle* New();
-
-	vtkTypeMacro(ArrowInteractorStyle, vtkInteractorStyleTrackballCamera);
-	virtual void OnKeyPress() override
-	{
-		vtkRenderWindowInteractor* rwi = this->Interactor;
-		std::string key = rwi->GetKeySym();
-		if (key == "Up") {
-			inputAxis[1] += 10;
-		}
-		if (key == "Down") {
-			inputAxis[1] -= 10;
-		}
-		if (key == "Right") {
-			inputAxis[0] -= 10;
-		}
-		if (key == "Left") {
-			inputAxis[0] += 10;
-		}
-
-		vtkInteractorStyleTrackballCamera::OnKeyPress();
-	}
-
-	void InitiailizeAxis() {
-		inputAxis = new int[2] {0, 0};
-	}
-
-	int GetPosX() const {
-		return this->inputAxis[0];
-	}
-
-	int GetPosY() const {
-		return this->inputAxis[1];
-	}
-
-};
+#include<ArrowInteractorStyle.h>
+#include "VTKWave.h"
+#include "omp.h"
 vtkStandardNewMacro(ArrowInteractorStyle);
 
 struct UpdateData {
@@ -111,7 +73,8 @@ std::vector<unsigned short>  ReadDataFromFile(std::string path) {
 	std::vector<unsigned short> fileData(fileSize / sizeof(unsigned short));
 	readStream.read(reinterpret_cast<char*>(fileData.data()), fileSize);
 	readStream.close();
-
+	auto max_it = std::max_element(fileData.begin(), fileData.end());
+	std::cout << path << ": " << *max_it << std::endl;
 	if (512 * 512 * 247 != fileData.size()) {
 		std::cerr << "Volume dimensions do not match the file size" << std::endl;
 	}
@@ -138,7 +101,7 @@ void Update(vtkObject* caller, long unsigned int eventId, void* clientData, void
 	interactor->GetRenderWindow()->Render();
 }
 
-vtkSmartPointer<vtkPNGReader> ReadHeightMap(std::string height_map){
+vtkSmartPointer<vtkPNGReader> ReadHeightMap(std::string height_map) {
 	vtkSmartPointer<vtkPNGReader> reader = vtkSmartPointer<vtkPNGReader>::New();
 	reader->SetFileName(height_map.c_str());
 	if (reader->CanReadFile(height_map.c_str()) == false) {
@@ -168,7 +131,52 @@ vtkSmartPointer<vtkSkybox> CreateSkybox(std::vector<std::string> fileNames) {
 }
 
 
-int main(int argc, char* argv[])
+VTKWave::VTKWave()
+{
+
+}
+
+void VTKWave::UpdateSlicePosX(int value)
+{
+	slicePosX = value;
+	UpdateSlice();
+}
+
+void VTKWave::UpdateSlicePosY(int value)
+{
+	slicePosY = value;
+	UpdateSlice();
+}
+
+void VTKWave::UpdateDensity(int value)
+{
+	opacityFunction->RemoveAllPoints();
+	opacityFunction->AddPoint(value, 0.0);
+	opacityFunction->AddPoint(5257, 1.0);
+}
+
+void VTKWave::UpdateSlice() {
+	auto points = ctData->GetNumberOfPoints();
+	auto ctValue = static_cast<unsigned short*>(ctData->GetScalarPointer());
+	auto ctCachedValue = static_cast<unsigned short*>(ctCacheData->GetScalarPointer());
+	auto mrValue = static_cast<unsigned short*>(mriData->GetScalarPointer());
+	auto mrCachedValue = static_cast<unsigned short*>(mriCacheData->GetScalarPointer());
+	#pragma omp parallel for
+	for (vtkIdType i = 0; i < points; i++) {
+		double pos[3];
+		ctData->GetPoint(i, pos);
+		if (pos[0] < slicePosX && pos[1] < slicePosY) {
+			ctValue[i] = 0;
+			mrValue[i] = 0;
+		}
+		else {
+			ctValue[i] = ctCachedValue[i];
+			mrValue[i] = mrCachedValue[i];
+		}
+	}
+}
+
+vtkSmartPointer<vtkGenericOpenGLRenderWindow> VTKWave::GetRenderWindow()
 {
 	// Create a renderer
 	vtkSmartPointer<vtkRenderer> renderer = vtkSmartPointer<vtkRenderer>::New();
@@ -176,50 +184,66 @@ int main(int argc, char* argv[])
 	vtkSmartPointer<vtkPNGReader> height_map = ReadHeightMap(R"(images\height_map.png)");
 
 	vtkSmartPointer<vtkColorTransferFunction> colorTransferFunction = vtkSmartPointer<vtkColorTransferFunction>::New();
-	colorTransferFunction->AddRGBPoint(0.0, 0.0, 0.0, 0.0);  
-	colorTransferFunction->AddRGBPoint(255.0, 1.0, 1.0, 1.0);
+	colorTransferFunction->AddRGBPoint(0.0, 0.0, 0.0, 0.0);
+	colorTransferFunction->AddRGBPoint(5257, 1.0, 1.0, 1.0);
 
-	vtkSmartPointer<vtkPiecewiseFunction> opacityFunction = vtkSmartPointer<vtkPiecewiseFunction>::New();
-	opacityFunction->AddPoint(0.0, 0.0);
-	opacityFunction->AddPoint(255.0, 1.0);
+	vtkSmartPointer<vtkColorTransferFunction> colorTransferFunction1 = vtkSmartPointer<vtkColorTransferFunction>::New();
+	colorTransferFunction1->AddRGBPoint(0.0, 0.0, 0.0, 0.0);
+	colorTransferFunction1->AddRGBPoint(597, 1.0, 1.0, 1.0);
 
-	auto volumeProperty = vtkSmartPointer<vtkVolumeProperty>::New();
-	volumeProperty->SetScalarOpacity(opacityFunction);
+	opacityFunction = vtkSmartPointer<vtkPiecewiseFunction>::New();
+	opacityFunction->AddPoint(0, 0.0);
+	opacityFunction->AddPoint(5257, 1.0);
+
+	vtkSmartPointer<vtkPiecewiseFunction> densityFunction = vtkSmartPointer<vtkPiecewiseFunction>::New();
+	densityFunction->AddPoint(0.0, 0.0);
+	densityFunction->AddPoint(597, 1.0);
+
+	auto CTVolumeProperty = vtkSmartPointer<vtkVolumeProperty>::New();
+	CTVolumeProperty->SetScalarOpacity(opacityFunction);
 	//volumeProperty->ShadeOn();
-	volumeProperty->SetColor(colorTransferFunction);
-	volumeProperty->SetInterpolationTypeToLinear();
+	CTVolumeProperty->SetColor(colorTransferFunction);
+	CTVolumeProperty->SetInterpolationTypeToLinear();
+
+	auto RTVolumeProperty = vtkSmartPointer<vtkVolumeProperty>::New();
+	RTVolumeProperty->SetScalarOpacity(densityFunction);
+	RTVolumeProperty->SetColor(colorTransferFunction1);
+	RTVolumeProperty->SetInterpolationTypeToLinear();
 
 	auto data = ReadDataFromFile(R"(images\CT.rdata)");
 
-	auto imageData = vtkSmartPointer<vtkImageData>::New();
-	imageData->SetDimensions(512, 512, 247);
-	imageData->SetSpacing(0.447266, 0.447266, 0.625);
-	imageData->SetOrigin(0.0, 0.0, 0.0);
-	imageData->AllocateScalars(VTK_UNSIGNED_SHORT, 1);
-	unsigned short* pointer = static_cast<unsigned short*>(imageData->GetScalarPointer());
+	ctData = vtkSmartPointer<vtkImageData>::New();
+	ctCacheData = vtkSmartPointer<vtkImageData>::New();
+	ctData->SetDimensions(512, 512, 247);
+	ctData->SetSpacing(0.447266, 0.447266, 0.625);
+	ctData->SetOrigin(0.0, 0.0, 0.0);
+	ctData->AllocateScalars(VTK_UNSIGNED_SHORT, 1);
+	unsigned short* pointer = static_cast<unsigned short*>(ctData->GetScalarPointer());
 	std::copy(data.begin(), data.end(), pointer);
-
+	ctCacheData->DeepCopy(ctData);
 	auto mapper1 = vtkSmartPointer<vtkFixedPointVolumeRayCastMapper>::New();
-	mapper1->SetInputData(imageData);
+	mapper1->SetInputData(ctData);
 	auto volume1 = vtkSmartPointer<vtkVolume>::New();
 	volume1->SetMapper(mapper1);
-	volume1->SetProperty(volumeProperty);
+	volume1->SetProperty(CTVolumeProperty);
 
 	auto data2 = ReadDataFromFile(R"(images\MR_TO_CT.rdata)");
 
-	auto imageData1 = vtkSmartPointer<vtkImageData>::New();
-	imageData1->SetDimensions(512, 512, 247);
-	imageData1->SetSpacing(0.447266, 0.447266, 0.625);
-	imageData1->SetOrigin(0.0, 0.0, 0.0);
-	imageData1->AllocateScalars(VTK_UNSIGNED_SHORT, 1);
-	unsigned short* pointer1 = static_cast<unsigned short*>(imageData1->GetScalarPointer());
-	std::copy(data2.begin(), data2.end(), pointer);
-
+	mriData = vtkSmartPointer<vtkImageData>::New();
+	mriCacheData = vtkSmartPointer<vtkImageData>::New();
+	mriData->SetDimensions(512, 512, 247);
+	mriData->SetSpacing(0.447266, 0.447266, 0.625);
+	mriData->SetOrigin(0.0, 0.0, 0.0);
+	mriData->AllocateScalars(VTK_UNSIGNED_SHORT, 1);
+	unsigned short* pointer1 = static_cast<unsigned short*>(mriData->GetScalarPointer());
+	std::copy(data2.begin(), data2.end(), pointer1);
+	mriCacheData->DeepCopy(mriData);
 	auto mapper2 = vtkSmartPointer<vtkFixedPointVolumeRayCastMapper>::New();
-	mapper2->SetInputData(imageData);
+	mapper2->SetInputData(mriData);
 	auto volume2 = vtkSmartPointer<vtkVolume>::New();
 	volume2->SetMapper(mapper2);
-	volume2->SetProperty(volumeProperty);
+	volume2->SetProperty(RTVolumeProperty);
+	UpdateSlice();
 
 	camera->GetProjectionTransformMatrix(renderer)->Print(std::cout);
 	vtkSmartPointer<ArrowInteractorStyle> arrowInteractor = vtkSmartPointer<ArrowInteractorStyle>::New();
@@ -233,33 +257,7 @@ int main(int argc, char* argv[])
 	renderer->AddVolume(volume1);
 	renderer->AddVolume(volume2);
 	renderer->SetBackground(0.1, 0.2, 0.4);
-	vtkSmartPointer<vtkRenderWindow> renderWindow = vtkSmartPointer<vtkRenderWindow>::New();
+	vtkSmartPointer<vtkGenericOpenGLRenderWindow> renderWindow = vtkSmartPointer<vtkGenericOpenGLRenderWindow>::New();
 	renderWindow->AddRenderer(renderer);
-
-	//auto skybox = CreateSkybox({R"(images\posx.jpg)", R"(images\negx.jpg)",
-	//							R"(images\negy.jpg)", R"(images\posy.jpg)",
-	//							R"(images\posz.jpg)", R"(images\negz.jpg)"});
-	//renderer->AddActor(skybox);
-
-	// Create a render window interactor
-	vtkSmartPointer<vtkRenderWindowInteractor> renderWindowInteractor = vtkSmartPointer<vtkRenderWindowInteractor>::New();
-
-	renderWindowInteractor->SetRenderWindow(renderWindow);
-	renderWindowInteractor->SetInteractorStyle(arrowInteractor);
-	// Initialize the interactor and start the rendering loop
-	renderWindow->Render();
-	renderWindowInteractor->Initialize();
-
-	//UpdateData clientData;
-	//clientData.time = 0;
-	//clientData.arrowInteractor = arrowInteractor;
-	//clientData.mesh = voxel;
-
-	//vtkSmartPointer<vtkCallbackCommand> renderCallback = vtkSmartPointer<vtkCallbackCommand>::New();
-	//renderCallback->SetCallback(Update);
-	//renderCallback->SetClientData(&clientData);
-	//renderWindowInteractor->AddObserver(vtkCommand::TimerEvent, renderCallback);
-	//int timerId = renderWindowInteractor->CreateRepeatingTimer(0);
-	renderWindowInteractor->Start();
-	return 0;
+	return renderWindow;
 }
